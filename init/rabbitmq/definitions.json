@@ -1,0 +1,135 @@
+{
+  "rabbit_version": "3.12.0",
+  "users": [
+    {
+      "name": "agentuser",
+      "password_hash": "1B2M2VCXtbwUkivxDt3vwXSxcEDNiq5nhRoBoa+WaLPA0zrJ",
+      "hashing_algorithm": "rabbit_password_hashing_sha256",
+      "tags": "administrator"
+    }
+  ],
+  "vhosts": [{ "name": "/" }],
+  "permissions": [
+    {
+      "user": "agentuser",
+      "vhost": "/",
+      "configure": ".*",
+      "write": ".*",
+      "read": ".*"
+    }
+  ],
+  "exchanges": [
+    {
+      "name": "leads.direct",
+      "vhost": "/",
+      "type": "direct",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {}
+    },
+    {
+      "name": "leads.dlx",
+      "vhost": "/",
+      "type": "direct",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {}
+    }
+  ],
+  "queues": [
+    {
+      "name": "coordinator_queue",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-dead-letter-exchange": "leads.dlx",
+        "x-dead-letter-routing-key": "dlq",
+        "x-message-ttl": 300000
+      }
+    },
+    {
+      "name": "analysis_queue",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-dead-letter-exchange": "leads.dlx",
+        "x-dead-letter-routing-key": "dlq",
+        "x-message-ttl": 300000
+      }
+    },
+    {
+      "name": "planning_queue",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-dead-letter-exchange": "leads.dlx",
+        "x-dead-letter-routing-key": "dlq",
+        "x-message-ttl": 300000
+      }
+    },
+    {
+      "name": "executor_queue",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-dead-letter-exchange": "leads.dlx",
+        "x-dead-letter-routing-key": "dlq",
+        "x-message-ttl": 300000
+      }
+    },
+    {
+      "name": "validator_queue",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-dead-letter-exchange": "leads.dlx",
+        "x-dead-letter-routing-key": "dlq",
+        "x-message-ttl": 300000
+      }
+    },
+    {
+      "name": "supervisor_queue",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-dead-letter-exchange": "leads.dlx",
+        "x-dead-letter-routing-key": "dlq",
+        "x-message-ttl": 300000
+      }
+    },
+    {
+      "name": "coordinator_responses",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-message-ttl": 300000
+      }
+    },
+    {
+      "name": "leads.dlq",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {}
+    }
+  ],
+  "bindings": [
+    { "source": "leads.direct", "vhost": "/", "destination": "coordinator_queue",      "destination_type": "queue", "routing_key": "coordinator",      "arguments": {} },
+    { "source": "leads.direct", "vhost": "/", "destination": "analysis_queue",         "destination_type": "queue", "routing_key": "analysis",         "arguments": {} },
+    { "source": "leads.direct", "vhost": "/", "destination": "planning_queue",         "destination_type": "queue", "routing_key": "planning",         "arguments": {} },
+    { "source": "leads.direct", "vhost": "/", "destination": "executor_queue",         "destination_type": "queue", "routing_key": "executor",         "arguments": {} },
+    { "source": "leads.direct", "vhost": "/", "destination": "validator_queue",        "destination_type": "queue", "routing_key": "validator",        "arguments": {} },
+    { "source": "leads.direct", "vhost": "/", "destination": "supervisor_queue",       "destination_type": "queue", "routing_key": "supervisor",       "arguments": {} },
+    { "source": "leads.direct", "vhost": "/", "destination": "coordinator_responses",  "destination_type": "queue", "routing_key": "coordinator_response", "arguments": {} },
+    { "source": "leads.dlx",   "vhost": "/", "destination": "leads.dlq",              "destination_type": "queue", "routing_key": "dlq",              "arguments": {} }
+  ]
+}

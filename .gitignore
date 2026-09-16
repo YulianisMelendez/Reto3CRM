@@ -1,0 +1,14 @@
+# Entorno virtual Python
+venv/
+__pycache__/
+*.pyc
+
+# Variables de entorno locales
+.env
+
+# Resultados generados por run_tests.py
+resultados_pruebas_*.txt
+
+# Sistema
+.DS_Store
+Thumbs.db
