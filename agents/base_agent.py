@@ -14,7 +14,7 @@ import pika
 sys.path.insert(0, "/app/shared")
 from messaging import (
     get_rabbitmq_connection, declare_topology, publish,
-    log_message, log_decision, get_redis, update_context
+    log_message, get_redis
 )
 
 log = logging.getLogger("base_agent")
@@ -124,9 +124,9 @@ class BaseAgent(ABC):
                 ),
             )
 
-            if not error_code:
-                log_decision(lead_id, self.name, result)
-                update_context(self.redis, lead_id, {f"resultado_{self.name}": result})
+            # El registro de la decisión y la persistencia del contexto quedan
+            # centralizados en el Coordinador (único responsable del estado
+            # autorizado del lead) para no duplicar escrituras en decision_log.
 
             log_message(
                 lead_id, f"agente_{self.name}", "coordinador",

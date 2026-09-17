@@ -1,5 +1,3 @@
-version: "3.9"
-
 # ============================================================
 # Plataforma Multi-Agente Distribuida — Reto 3 SuiteCRM
 # ============================================================
@@ -155,7 +153,6 @@ services:
     build:
       context: .
       dockerfile: agents/analysis/Dockerfile
-    container_name: agent-analysis
     networks: [agentnet]
     environment:
       <<: *agent-env
@@ -172,7 +169,6 @@ services:
     build:
       context: .
       dockerfile: agents/planning/Dockerfile
-    container_name: agent-planning
     networks: [agentnet]
     environment:
       <<: *agent-env
@@ -189,7 +185,6 @@ services:
     build:
       context: .
       dockerfile: agents/executor/Dockerfile
-    container_name: agent-executor
     networks: [agentnet]
     environment:
       <<: *agent-env
@@ -213,7 +208,6 @@ services:
     build:
       context: .
       dockerfile: agents/validator/Dockerfile
-    container_name: agent-validator
     networks: [agentnet]
     environment:
       <<: *agent-env
@@ -230,7 +224,6 @@ services:
     build:
       context: .
       dockerfile: agents/supervisor/Dockerfile
-    container_name: agent-supervisor
     networks: [agentnet]
     environment:
       <<: *agent-env

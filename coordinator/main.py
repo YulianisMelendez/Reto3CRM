@@ -147,11 +147,14 @@ class Coordinator:
             # Obtener contexto actual
             ctx = get_context(self.redis, lead_id) or {}
 
-            if status == "error":
-                # Detener pipeline y registrar error
+            if status == "error" and agent != "validator":
+                # Falla no recuperable antes de validación: se detiene el flujo.
                 self._handle_agent_error(lead_id, agent, error_code, result, ctx)
             else:
-                # Guardar resultado del agente en contexto
+                # Guardar resultado del agente en contexto. Una falla de
+                # VALIDACIÓN también se guarda y se deja avanzar: es el
+                # Supervisor quien decide si el lead queda aprobado o requiere
+                # revisión humana, no el Coordinador.
                 ctx[f"resultado_{agent}"] = result
                 log_decision(lead_id, agent, result)
 
@@ -160,14 +163,15 @@ class Coordinator:
                 if next_agent:
                     self._dispatch_to_agent(lead_id, next_agent, ctx, "pipeline")
                 else:
-                    # Pipeline completo
-                    estado_final = "completado"
+                    # Pipeline completo: el estado final lo decide el último
+                    # agente (Supervisor) — el Coordinador solo lo registra.
+                    estado_final = result.get("estado_final", "completado")
                     ctx["estado"]        = estado_final
                     ctx["agente_actual"] = "ninguno"
                     save_context(self.redis, lead_id, ctx)
                     log_message(lead_id, "coordinador", "sistema", "pipeline.completed",
                                 ctx, "completed")
-                    log.info(f"✓ Pipeline completado para lead={lead_id}")
+                    log.info(f"✓ Pipeline completado para lead={lead_id} estado={estado_final}")
 
             ch.basic_ack(method.delivery_tag)
 
@@ -177,7 +181,7 @@ class Coordinator:
 
     # ── Lógica de despacho (ÚNICO punto de publicación a colas de agentes) ────
 
-    def _dispatch_to_agent(self, lead_id: str, agent: str, ctx: dict, reason: str):
+    def _dispatch_to_agent(self, lead_id: str, agent: str, ctx: dict, reason: str, retries: int = 0):
         """El Coordinador es el ÚNICO que publica en las colas de los agentes."""
         state = STATE_MAP.get(agent, f"{agent}_pendiente")
         ctx["estado"]        = state
@@ -201,12 +205,14 @@ class Coordinator:
         log_message(lead_id, "coordinador", f"agente_{agent}", reason,
                     msg["payload"], "dispatched", message_id=msg["message_id"])
 
-        # Registrar en pendientes para detección de timeout
+        # Registrar en pendientes para detección de timeout. `retries` conserva
+        # el conteo de reintentos ya acumulado (0 en un despacho nuevo, o el
+        # valor pasado por _check_timeouts en un reintento).
         self._pending[msg["message_id"]] = {
             "lead_id":   lead_id,
             "agent":     agent,
             "timestamp": time.time(),
-            "retries":   0,
+            "retries":   retries,
             "ctx":       ctx,
         }
         log.info(f"[DISPATCH] lead={lead_id} → agente={agent} state={state}")
@@ -245,19 +251,18 @@ class Coordinator:
             ctx     = info["ctx"]
             log.warning(f"[TIMEOUT] lead={lead_id} agent={agent} retries={retries}")
 
+            self._pending.pop(msg_id, None)
+
             if retries < TIMEOUT_RETRIES:
-                log.info(f"Reintentando lead={lead_id} → {agent} (intento {retries+1})")
-                info["retries"]   += 1
-                info["timestamp"]  = now
-                self._dispatch_to_agent(lead_id, agent, ctx, "retry")
-                self._pending.pop(msg_id, None)
+                nuevo_retries = retries + 1
+                log.info(f"Reintentando lead={lead_id} → {agent} (intento {nuevo_retries})")
+                self._dispatch_to_agent(lead_id, agent, ctx, "retry", retries=nuevo_retries)
 
                 log_message(lead_id, "coordinador", f"agente_{agent}", "timeout.retry",
-                            {"retry": retries+1}, "retry")
+                            {"retry": nuevo_retries}, "retry")
                 update_context(self.redis, lead_id, {"estado": f"reintentando_{agent}"})
             else:
                 log.error(f"Max reintentos agotados para lead={lead_id} agent={agent} → DLQ")
-                self._pending.pop(msg_id, None)
                 update_context(self.redis, lead_id, {
                     "estado":        f"fallido_{agent}_timeout",
                     "error_codigo":  "AGENT_TIMEOUT",
@@ -265,6 +270,26 @@ class Coordinator:
                 })
                 log_message(lead_id, "coordinador", f"agente_{agent}", "timeout.max_retries",
                             {"agent": agent, "retries": retries}, "error", error_codigo="AGENT_TIMEOUT")
+                self._send_to_dlq(lead_id, agent, retries)
+
+    def _send_to_dlq(self, lead_id: str, agent: str, retries: int):
+        """Deriva explícitamente el lead fallido al Dead Letter Exchange tras agotar reintentos."""
+        try:
+            body = json.dumps({
+                "lead_id": lead_id,
+                "agent": agent,
+                "reason": "AGENT_TIMEOUT",
+                "retries": retries,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }).encode()
+            self.channel.basic_publish(
+                exchange="leads.dlx",
+                routing_key="dlq",
+                body=body,
+                properties=pika.BasicProperties(delivery_mode=2, content_type="application/json"),
+            )
+        except Exception as e:
+            log.error(f"No se pudo derivar lead={lead_id} a leads.dlq: {e}")
 
     # ── Loop principal ────────────────────────────────────────────────────────
 

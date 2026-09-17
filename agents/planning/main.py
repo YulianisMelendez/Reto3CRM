@@ -13,24 +13,15 @@ logging.basicConfig(
 )
 log = logging.getLogger("agent.planning")
 
-# Pool de asesores (en producción vendría de SuiteCRM)
+# Pool de asesores por segmento (en producción vendría de SuiteCRM).
+# La asignación rota round-robin dentro de cada segmento usando un contador
+# en Redis, para que leads consecutivos del mismo tipo_cliente no siempre
+# caigan en el mismo asesor.
 ASESORES = {
     "enterprise": ["Jhon Mendez",    "Ana Rodriguez"],
     "mid_market": ["Sofia Vargas",   "Miguel Torres"],
     "smb":        ["Laura Castillo", "Jose Herrera"],
     "desconocido":["Jhon Mendez",    "Soporte Básico"],
-}
-
-ASESORES_SECTOR = {
-    "tecnologia":   "Jhon Mendez",
-    "technology":   "Jhon Mendez",
-    "finanzas":     "Jhon Mendez",
-    "banca":        "Jhon Mendez",
-    "salud":        "Ana Rodriguez",
-    "health":       "Ana Rodriguez",
-    "farmaceutico": "Ana Rodriguez",
-    "manufactura":  "Sofia Vargas",
-    "retail":       "Miguel Torres",
 }
 
 PRIORITY_SCORE = {
@@ -57,11 +48,10 @@ class PlanningAgent(BaseAgent):
         interes           = analisis.get("interes_comercial",  "general")
         prioridad_suger   = analisis.get("prioridad_sugerida", "media")
 
-        # ── Asignación de asesor ──────────────────────────────────────────────
-        asesor = (
-            ASESORES_SECTOR.get(sector)
-            or (ASESORES.get(tipo_cliente) or ASESORES["desconocido"])[0]
-        )
+        # ── Asignación de asesor (round-robin por segmento) ───────────────────
+        pool = ASESORES.get(tipo_cliente) or ASESORES["desconocido"]
+        contador = self.redis.incr(f"asesor_rotacion:{tipo_cliente}")
+        asesor = pool[(contador - 1) % len(pool)]
 
         # Asesor asignado en SuiteCRM (si ya venía asignado, respetar)
         asesor_actual = lead.get("assigned_user")

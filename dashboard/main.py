@@ -2,16 +2,15 @@ import json
 import logging
 import os
 import sys
-import urllib.request
 from datetime import datetime, timezone
 from typing import Optional
 
 import psycopg2
 import psycopg2.extras
 import redis as redis_lib
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse
 
 sys.path.insert(0, "/app/shared")
 from messaging import get_redis, get_context, PG_DSN
@@ -21,7 +20,6 @@ logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"),
 log = logging.getLogger("dashboard")
 
 SUITECRM_EXTERNAL_URL = os.getenv("SUITECRM_EXTERNAL_URL", "http://localhost:8081")
-WEBHOOK_INTERNAL_URL  = os.getenv("WEBHOOK_INTERNAL_URL", "http://webhook:8080")
 
 app = FastAPI(title="Dashboard Multi-Agente", version="1.0.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"],
@@ -189,436 +187,7 @@ def get_stats():
     }
 
 
-@app.post("/api/send_test_lead")
-async def send_test_lead(request: Request):
-    """Dispara un lead real al webhook para pruebas interactivas."""
-    try:
-        body = await request.json()
-    except Exception:
-        body = {}
 
-    lead_id = body.get("lead_id") or f"lead-{int(datetime.now().timestamp())}"
-    payload = {
-        "lead_id":        lead_id,
-        "company":        body.get("company", "Inversiones Beta SA"),
-        "sector":         body.get("sector", "Fintech"),
-        "annual_revenue": float(body.get("annual_revenue", 680000)),
-        "email":          body.get("email", f"contacto@{lead_id}.com"),
-        "phone":          body.get("phone", "+57 300 555 1234"),
-        "description":    body.get("description", "Lead generado interactivamente desde el Robot Guía."),
-        "assigned_user":  body.get("assigned_user", "Carlos Mendez")
-    }
-
-    try:
-        req = urllib.request.Request(
-            f"{WEBHOOK_INTERNAL_URL}/webhook/lead",
-            data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json"}
-        )
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-        return {"status": "ok", "lead_id": lead_id, "data": data}
-    except Exception as e:
-        log.error(f"Error enviando lead a webhook: {e}")
-        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
-
-
-@app.get("/api/test_results")
-def get_test_results():
-    """Reporte oficial de los 27 casos de prueba ejecutados."""
-    tests = [
-        {"id": "CP-COORD-001", "name": "Procesamiento de creación de Lead", "agente": "Coordinator", "status": "PASS"},
-        {"id": "CP-COORD-002", "name": "Selección de primer agente (analysis_queue)", "agente": "Coordinator", "status": "PASS"},
-        {"id": "CP-COORD-003", "name": "Publicación centralizada en colas", "agente": "Coordinator", "status": "PASS"},
-        {"id": "CP-COORD-004", "name": "Detención por INSUFFICIENT_DATA", "agente": "Coordinator", "status": "PASS"},
-        {"id": "CP-COORD-005", "name": "Persistencia progresiva de contexto", "agente": "Coordinator", "status": "PASS"},
-        {"id": "CP-COORD-006", "name": "Timeout y reintento/derivación", "agente": "Coordinator", "status": "PASS"},
-        {"id": "CP-ANAL-001", "name": "Recepción exclusiva desde Coordinador", "agente": "Analysis", "status": "PASS"},
-        {"id": "CP-ANAL-002", "name": "Clasificación y resultado estructurado", "agente": "Analysis", "status": "PASS"},
-        {"id": "CP-ANAL-003", "name": "Detección de datos incompletos", "agente": "Analysis", "status": "PASS"},
-        {"id": "CP-PLAN-001", "name": "Definición de tareas y asignación de asesor", "agente": "Planning", "status": "PASS"},
-        {"id": "CP-PLAN-002", "name": "Prioridad comercial coherente", "agente": "Planning", "status": "PASS"},
-        {"id": "CP-PLAN-003", "name": "Programación de llamadas de seguimiento", "agente": "Planning", "status": "PASS"},
-        {"id": "CP-EXEC-001", "name": "Creación en SuiteCRM vía REST v4.1", "agente": "Executor", "status": "PASS"},
-        {"id": "CP-EXEC-002", "name": "Registro de llamadas vinculadas en SuiteCRM", "agente": "Executor", "status": "PASS"},
-        {"id": "CP-VALI-001", "name": "Validación de coherencia y campos obligatorios", "agente": "Validator", "status": "PASS"},
-        {"id": "CP-VALI-002", "name": "Validación de políticas comerciales", "agente": "Validator", "status": "PASS"},
-        {"id": "CP-SUPE-001", "name": "Consolidación de resultados y decisión final", "agente": "Supervisor", "status": "PASS"},
-        {"id": "CP-SUPE-002", "name": "Detección de intervención humana", "agente": "Supervisor", "status": "PASS"},
-        {"id": "CP-INFRA-001", "name": "RabbitMQ: exchanges leads.direct y DLX", "agente": "Infraestructura", "status": "PASS"},
-        {"id": "CP-INFRA-002", "name": "RabbitMQ: colas declaradas con DLX", "agente": "Infraestructura", "status": "PASS"},
-        {"id": "CP-INFRA-003", "name": "PostgreSQL: vista lead_trace y message_log", "agente": "Infraestructura", "status": "PASS"},
-        {"id": "CP-INFRA-004", "name": "Redis: contextos estructurados", "agente": "Infraestructura", "status": "PASS"},
-        {"id": "CP-INFRA-005", "name": "Dashboard API /api/leads funcional", "agente": "Infraestructura", "status": "PASS"},
-        {"id": "CP-INFRA-006", "name": "Dashboard API /api/stats métricas", "agente": "Infraestructura", "status": "PASS"},
-        {"id": "CP-CONCUR-001", "name": "Procesamiento concurrente sin colisiones", "agente": "Concurrencia", "status": "PASS"},
-        {"id": "CP-IDEM-001", "name": "Idempotencia: no duplicidad de leads", "agente": "Idempotencia", "status": "PASS"},
-        {"id": "CP-TRAZ-001", "name": "Trazabilidad completa de punta a punta", "agente": "Trazabilidad", "status": "PASS"}
-    ]
-    # Estos resultados hardcodeados son el fallback si Redis no tiene datos aún
-    try:
-        r = get_redis()
-        raw = r.get("test:results")
-        if raw:
-            data = json.loads(raw)
-            cases = data.get("cases", [])
-            passed_n = data.get("passed", 0)
-            total_n  = data.get("total", len(cases))
-            pct      = data.get("pct", 0)
-            return {
-                "total": total_n, "passed": passed_n,
-                "failed": total_n - passed_n,
-                "score": f"{pct:.1f}%",
-                "status": "APROBADO" if data.get("approved") else "NO_APROBADO",
-                "timestamp": data.get("timestamp"),
-                "tests": cases,
-            }
-    except Exception as e:
-        log.warning(f"No se pudo leer test:results de Redis: {e}")
-    # Sin datos en Redis — retornar vacío
-    return {"total": 0, "passed": 0, "failed": 0, "score": "—",
-            "status": "SIN_DATOS", "tests": [], "timestamp": None}
-
-
-
-def build_splash_loader(title: str, badge: str, theme_color: str, uid: str = "main") -> str:
-    tpl = '''
-<!-- CRM SPLASH LOADER OVERLAY -->
-<div id="crm-splash-overlay" data-text="__TITLE__" onclick="window.dismissSplash && window.dismissSplash(true)">
-  <style>
-    #crm-splash-overlay {
-      position: fixed;
-      inset: 0;
-      z-index: 9999999;
-      background: radial-gradient(circle at 50% 40%, #111827 0%, #070a11 100%);
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      overflow: hidden;
-      cursor: pointer;
-      transition: opacity 0.5s cubic-bezier(0.16, 1, 0.3, 1), transform 0.5s cubic-bezier(0.16, 1, 0.3, 1), visibility 0.5s;
-    }
-    #crm-splash-overlay.fade-out {
-      opacity: 0;
-      transform: scale(1.02);
-      pointer-events: none;
-      visibility: hidden;
-    }
-    .splash-bg-glow {
-      position: absolute;
-      width: 580px;
-      height: 580px;
-      border-radius: 50%;
-      background: radial-gradient(circle, __THEME__33 0%, __THEME__08 50%, transparent 70%);
-      filter: blur(50px);
-      pointer-events: none;
-      animation: splash-pulse 3s ease-in-out infinite alternate;
-    }
-    @keyframes splash-pulse {
-      0% { transform: scale(0.9); opacity: 0.6; }
-      100% { transform: scale(1.15); opacity: 1; }
-    }
-    .splash-container {
-      position: relative;
-      z-index: 2;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      text-align: center;
-      padding: 24px;
-      max-width: 750px;
-      width: 100%;
-    }
-    .splash-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      padding: 6px 18px;
-      background: rgba(255, 255, 255, 0.05);
-      border: 1px solid rgba(255, 255, 255, 0.12);
-      border-radius: 9999px;
-      font-size: 0.74rem;
-      font-weight: 700;
-      color: #c7d2fe;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      margin-bottom: 28px;
-      backdrop-filter: blur(10px);
-    }
-    .splash-badge-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: __THEME__;
-      box-shadow: 0 0 10px __THEME__;
-      animation: splash-dot-blink 1.2s ease-in-out infinite;
-    }
-    @keyframes splash-dot-blink {
-      0%, 100% { opacity: 1; transform: scale(1); }
-      50% { opacity: 0.4; transform: scale(0.85); }
-    }
-    .splash-stage {
-      position: relative;
-      display: inline-block;
-      min-height: 80px;
-      padding: 10px 24px 20px;
-    }
-    .splash-writing-line {
-      position: relative;
-      z-index: 5;
-      display: inline-flex;
-      align-items: baseline;
-      justify-content: flex-start;
-      font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
-      font-size: clamp(2.8rem, 7vw, 4.4rem);
-      font-weight: 800;
-      letter-spacing: -0.02em;
-      color: #ffffff !important;
-      min-width: 260px;
-      text-shadow: 0 4px 30px __THEME__88;
-    }
-    .splash-char {
-      display: inline-block;
-      color: #ffffff !important;
-      opacity: 0;
-      transform: translateY(6px) scale(0.92);
-      transition: opacity 0.1s ease-out, transform 0.1s ease-out;
-      white-space: pre;
-    }
-    .splash-char.drawn {
-      opacity: 1 !important;
-      transform: translateY(0) scale(1) !important;
-    }
-    .splash-pencil {
-      position: absolute;
-      z-index: 10;
-      top: 0;
-      left: 0;
-      width: 54px;
-      height: 54px;
-      pointer-events: none;
-      transform-origin: 5px 49px;
-      filter: drop-shadow(0 8px 18px rgba(0, 0, 0, 0.6));
-      transition: transform 0.08s cubic-bezier(0.2, 0.8, 0.4, 1);
-      will-change: transform;
-    }
-    .splash-pencil-svg {
-      width: 100%;
-      height: 100%;
-      overflow: visible;
-    }
-    .splash-lead-spark {
-      position: absolute;
-      left: 3px;
-      top: 47px;
-      width: 7px;
-      height: 7px;
-      border-radius: 50%;
-      background: #ffffff;
-      box-shadow: 0 0 12px 4px __THEME__, 0 0 24px 8px __THEME__aa;
-      pointer-events: none;
-      opacity: 0;
-      transform: scale(0.5);
-      transition: opacity 0.1s, transform 0.1s;
-    }
-    .splash-lead-spark.active {
-      opacity: 1;
-      transform: scale(1.3);
-    }
-    .splash-stroke-bar {
-      position: absolute;
-      z-index: 4;
-      bottom: 8px;
-      left: 24px;
-      height: 4px;
-      border-radius: 99px;
-      background: linear-gradient(90deg, __THEME__, #818cf8, #38bdf8);
-      box-shadow: 0 0 16px __THEME__cc;
-      width: 0%;
-      transition: width 0.08s linear;
-    }
-  </style>
-
-  <div class="splash-bg-glow"></div>
-  <div class="splash-container">
-    <div class="splash-badge">
-      <span class="splash-badge-dot"></span>
-      <span>__BADGE__</span>
-    </div>
-    
-    <div class="splash-stage">
-      <div id="splash-writing-line" class="splash-writing-line"></div>
-      
-      <!-- Lápiz animado con forma idéntica al icono del sistema -->
-      <div id="splash-pencil" class="splash-pencil">
-        <svg viewBox="0 0 54 54" class="splash-pencil-svg">
-          <defs>
-            <linearGradient id="pBodyGrad___UID__" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" stop-color="#fbbf24"/>
-              <stop offset="100%" stop-color="#f59e0b"/>
-            </linearGradient>
-            <linearGradient id="pEraserGrad___UID__" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" stop-color="#fb7185"/>
-              <stop offset="100%" stop-color="#e11d48"/>
-            </linearGradient>
-            <filter id="pGlow___UID__" x="-20%" y="-20%" width="140%" height="140%">
-              <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#000" flood-opacity="0.35"/>
-            </filter>
-          </defs>
-          <g filter="url(#pGlow___UID__)">
-            <!-- Borrador redondeado -->
-            <path d="M36 8 C38 6 42 6 44 8 C46 10 46 14 44 16 L39 21 L31 13 Z" 
-                  fill="url(#pEraserGrad___UID__)" stroke="#0f172a" stroke-width="2.5" stroke-linejoin="round"/>
-            <!-- Abrazadera metálica -->
-            <path d="M31 13 L39 21 L36 24 L28 16 Z" 
-                  fill="#cbd5e1" stroke="#0f172a" stroke-width="2.5" stroke-linejoin="round"/>
-            <!-- Cuerpo hexagonal -->
-            <path d="M28 16 L36 24 L19 41 L11 33 Z" 
-                  fill="url(#pBodyGrad___UID__)" stroke="#0f172a" stroke-width="2.5" stroke-linejoin="round"/>
-            <!-- Madera afilada -->
-            <path d="M11 33 L19 41 L5 49 Z" 
-                  fill="#fef3c7" stroke="#0f172a" stroke-width="2.5" stroke-linejoin="round"/>
-            <!-- Punta de grafito en (5, 49) -->
-            <path d="M5 49 L9 45 L7 43 Z" 
-                  fill="#0f172a" stroke="#0f172a" stroke-width="1"/>
-          </g>
-        </svg>
-        <div id="splash-lead-spark" class="splash-lead-spark"></div>
-      </div>
-      
-      <!-- Trazo inferior que acompaña la escritura -->
-      <div id="splash-stroke-bar" class="splash-stroke-bar"></div>
-    </div>
-  </div>
-
-  <script>
-  (function() {
-    const overlay = document.getElementById('crm-splash-overlay');
-    if (!overlay) return;
-
-    const targetText = overlay.dataset.text || "__TITLE__";
-    const line = document.getElementById('splash-writing-line');
-    const pencil = document.getElementById('splash-pencil');
-    const spark = document.getElementById('splash-lead-spark');
-    const strokeBar = document.getElementById('splash-stroke-bar');
-
-    let dismissed = false;
-    window.dismissSplash = function(immediate) {
-      if (dismissed) return;
-      dismissed = true;
-      overlay.classList.add('fade-out');
-      setTimeout(() => {
-        try { overlay.remove(); } catch(e) { overlay.style.display = 'none'; }
-      }, immediate ? 150 : 450);
-    };
-
-    window.addEventListener('keydown', function(e) {
-      if (e.key === 'Escape' || e.key === ' ' || e.key === 'Enter') {
-        window.dismissSplash(true);
-      }
-    }, { once: true });
-
-    line.innerHTML = '';
-    const charSpans = [];
-    for (let i = 0; i < targetText.length; i++) {
-      const sp = document.createElement('span');
-      sp.className = 'splash-char';
-      sp.textContent = targetText[i];
-      line.appendChild(sp);
-      charSpans.push(sp);
-    }
-
-    function runAnimation() {
-      const TIP_X = 5;
-      const TIP_Y = 49;
-
-      const stageRect = line.parentElement.getBoundingClientRect();
-      const stageLeft = stageRect.left;
-      const stageTop = stageRect.top;
-
-      function getTargetPos(index) {
-        if (index >= charSpans.length) {
-          const last = charSpans[charSpans.length - 1];
-          const r = last.getBoundingClientRect();
-          return {
-            x: (r.right - stageLeft) - TIP_X,
-            y: (r.bottom - stageTop - 14) - TIP_Y
-          };
-        }
-        const cur = charSpans[index];
-        const r = cur.getBoundingClientRect();
-        const posX = (r.left - stageLeft + (r.width * 0.65)) - TIP_X;
-        const posY = (r.bottom - stageTop - 14) - TIP_Y;
-        return { x: Math.max(0, posX), y: Math.max(0, posY) };
-      }
-
-      const p0 = getTargetPos(0);
-      pencil.style.transform = `translate(${p0.x - 20}px, ${p0.y - 15}px) rotate(12deg)`;
-      pencil.style.opacity = '1';
-
-      let currentIndex = 0;
-      const totalChars = charSpans.length;
-      const charDelay = 110;
-
-      spark.classList.add('active');
-
-      function drawStep() {
-        if (dismissed) return;
-
-        if (currentIndex < totalChars) {
-          const pos = getTargetPos(currentIndex);
-          const wobble = (currentIndex % 2 === 0 ? -4 : 4);
-          pencil.style.transform = `translate(${pos.x}px, ${pos.y}px) rotate(${wobble}deg)`;
-          
-          charSpans[currentIndex].classList.add('drawn');
-          
-          const pct = Math.round(((currentIndex + 1) / totalChars) * 100);
-          strokeBar.style.width = pct + '%';
-          
-          currentIndex++;
-          setTimeout(drawStep, charDelay);
-        } else {
-          finishAnimation();
-        }
-      }
-
-      setTimeout(drawStep, 80);
-
-      function finishAnimation() {
-        if (dismissed) return;
-        
-        spark.classList.remove('active');
-        const lastPos = getTargetPos(totalChars);
-        pencil.style.transition = 'transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.3s ease';
-        pencil.style.transform = `translate(${lastPos.x + 35}px, ${lastPos.y - 35}px) rotate(-15deg)`;
-        pencil.style.opacity = '0';
-
-        setTimeout(() => {
-          window.dismissSplash(false);
-        }, 600);
-      }
-    }
-
-    setTimeout(runAnimation, 50);
-    setTimeout(() => window.dismissSplash(false), 3800);
-  })();
-  </script>
-</div>
-'''
-    return (
-        tpl.replace("__TITLE__", title)
-           .replace("__BADGE__", badge)
-           .replace("__THEME__", theme_color)
-           .replace("__UID__", uid)
-    )
-
-_SPLASH_HTML_RETO = build_splash_loader(
-    title="Reto 3 CRM",
-    badge="PLATAFORMA MULTI-AGENTE &bull; RETO 3",
-    theme_color="#6366f1",
-    uid="reto"
-)
 
 # ── UI HTML 100% Reto 3 CRM Real ───────────────────────────────────────────────
 
@@ -916,7 +485,6 @@ _HTML = """<!DOCTYPE html>
     padding: 14px;
     text-align: left;
     transition: all 0.2s;
-    cursor: pointer;
   }
 
   .agent-box:hover {
@@ -1147,149 +715,9 @@ _HTML = """<!DOCTYPE html>
     overflow: auto;
   }
 
-  /* ── ROBOT GUÍA FLOTANTE (Asistente del Pipeline & Pruebas) ── */
-  .robot-fab {
-    position: fixed;
-    bottom: 24px;
-    right: 24px;
-    background: var(--primary);
-    color: #ffffff;
-    border-radius: var(--radius-full);
-    padding: 12px 20px;
-    box-shadow: 0 10px 25px -3px rgba(67, 56, 202, 0.4);
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    cursor: pointer;
-    font-size: 0.85rem;
-    font-weight: 700;
-    z-index: 1000;
-    transition: transform 0.2s;
-  }
-
-  .robot-fab:hover {
-    transform: translateY(-2px);
-    background: var(--primary-hover);
-  }
-
-  .robot-window {
-    display: none;
-    position: fixed;
-    bottom: 80px;
-    right: 24px;
-    width: 420px;
-    max-height: 600px;
-    background: #ffffff;
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    box-shadow: 0 20px 35px -5px rgba(0, 0, 0, 0.15);
-    z-index: 1001;
-    overflow: hidden;
-    flex-direction: column;
-  }
-
-  .robot-header {
-    background: var(--primary);
-    color: #ffffff;
-    padding: 14px 18px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-  }
-
-  .robot-header h4 {
-    font-size: 0.9rem;
-    font-weight: 700;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .robot-close {
-    background: transparent;
-    border: none;
-    color: #ffffff;
-    font-size: 1.1rem;
-    cursor: pointer;
-  }
-
-  .robot-tabs {
-    display: flex;
-    background: #f1f5f9;
-    border-bottom: 1px solid var(--border);
-  }
-
-  .robot-tab-btn {
-    flex: 1;
-    padding: 10px 6px;
-    background: transparent;
-    border: none;
-    font-size: 0.74rem;
-    font-weight: 700;
-    color: var(--text-body);
-    cursor: pointer;
-    text-align: center;
-  }
-
-  .robot-tab-btn.active {
-    background: #ffffff;
-    color: var(--primary);
-    border-bottom: 2px solid var(--primary);
-  }
-
-  .robot-body {
-    padding: 16px;
-    overflow-y: auto;
-    max-height: 480px;
-    font-size: 0.8rem;
-  }
-
-  .robot-bubble {
-    background: #f8fafc;
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 12px;
-    margin-bottom: 12px;
-    line-height: 1.45;
-  }
-
-  .robot-step-card {
-    background: #ffffff;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 10px;
-    margin-bottom: 8px;
-  }
-
-  .robot-step-title {
-    font-weight: 700;
-    color: var(--primary);
-    font-size: 0.78rem;
-    margin-bottom: 2px;
-  }
-
-  .test-input {
-    width: 100%;
-    padding: 7px 10px;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    font-size: 0.78rem;
-    margin-bottom: 8px;
-    font-family: inherit;
-  }
-
-  .test-badge-pass {
-    background: var(--green-light);
-    color: var(--green);
-    padding: 2px 7px;
-    border-radius: 99px;
-    font-size: 0.68rem;
-    font-weight: 700;
-  }
 </style>
 </head>
 <body>
-__SPLASH_LOADER__
 
 <!-- Sidebar Navigation -->
 <aside class="sidebar">
@@ -1310,14 +738,6 @@ __SPLASH_LOADER__
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
         Agentes Autónomos
       </a>
-      <a href="javascript:void(0)" onclick="openRobot('simular')" class="nav-link">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8" fill="currentColor"/></svg>
-        Simular Lead de Prueba
-      </a>
-      <a href="javascript:void(0)" onclick="openRobot('tests')" class="nav-link">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-        Resultados Tests (<span id="nav-test-count">—</span>)
-      </a>
       <a href="__CRM_URL__" target="_blank" class="nav-link">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3"/></svg>
         SuiteCRM Real ↗
@@ -1337,9 +757,6 @@ __SPLASH_LOADER__
     </div>
 
     <div class="top-actions">
-      <button class="btn-secondary" onclick="openRobot('guia')">
-        🤖 Robot Guía
-      </button>
       <button class="btn-secondary" onclick="refresh()">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
         Refrescar
@@ -1394,7 +811,7 @@ __SPLASH_LOADER__
     <div class="table-toolbar">
       <div>
         <h3 style="font-size:0.95rem;font-weight:800">Leads Procesados por el Pipeline</h3>
-        <p style="font-size:0.75rem;color:var(--text-muted);margin-top:2px">Haz clic en "Ver Trazabilidad" para inspeccionar el flujo o pregunta al Robot Guía</p>
+        <p style="font-size:0.75rem;color:var(--text-muted);margin-top:2px">Haz clic en "Ver Trazabilidad" para inspeccionar el flujo</p>
       </div>
 
       <div style="display:flex;align-items:center;gap:12px">
@@ -1455,30 +872,6 @@ __SPLASH_LOADER__
 
 </main>
 
-<!-- Botón Flotante del Robot Guía -->
-<div class="robot-fab" onclick="toggleRobot()">
-  <span>🤖</span>
-  <span>Robot Guía</span>
-</div>
-
-<!-- Ventana Flotante del Robot Guía -->
-<div class="robot-window" id="robot-window">
-  <div class="robot-header">
-    <h4><span>🤖</span> Robot Guía del Reto 3</h4>
-    <button class="robot-close" onclick="toggleRobot()">&times;</button>
-  </div>
-
-  <div class="robot-tabs">
-    <button class="robot-tab-btn active" id="tab-btn-guia" onclick="switchRobotTab('guia')">Cómo Funciona</button>
-    <button class="robot-tab-btn" id="tab-btn-simular" onclick="switchRobotTab('simular')">Simular Lead</button>
-    <button class="robot-tab-btn" id="tab-btn-tests" onclick="switchRobotTab('tests')">Tests (<span id="robot-test-count">—</span>)</button>
-  </div>
-
-  <div class="robot-body" id="robot-body">
-    <!-- Contenido dinámico según pestaña -->
-  </div>
-</div>
-
 <script>
 const CRM_BASE = "__CRM_URL__";
 let currentLeads = [];
@@ -1513,7 +906,7 @@ async function loadHeartbeats() {
       const on = info.online;
       const ts = info.timestamp ? info.timestamp.slice(11,19) : 'Sin señal';
       const role = AGENT_ROLES[name] || 'Agente';
-      return `<div class="agent-box" onclick="explainAgent('${name}')">
+      return `<div class="agent-box">
         <div class="agent-box-top">
           <span class="agent-title">${name}</span>
           <span class="status-dot ${on ? '' : 'off'}" title="${on ? 'Online' : 'Offline'}"></span>
@@ -1623,251 +1016,7 @@ async function inspectLead(leadId) {
     `).join('') || '<div style="color:var(--text-muted);font-size:0.75rem">Sin eventos</div>';
 
     drawer.scrollIntoView({ behavior: 'smooth' });
-
-    // Notificar al robot
-    tellRobotAboutLead(d);
   } catch(e) {}
-}
-
-/* ── ROBOT GUÍA INTERACTIVO ── */
-function toggleRobot() {
-  const win = document.getElementById('robot-window');
-  win.style.display = (win.style.display === 'flex' ? 'none' : 'flex');
-  if (win.style.display === 'flex') {
-    switchRobotTab('guia');
-  }
-}
-
-function openRobot(tab) {
-  const win = document.getElementById('robot-window');
-  win.style.display = 'flex';
-  switchRobotTab(tab);
-}
-
-function switchRobotTab(tab) {
-  document.querySelectorAll('.robot-tab-btn').forEach(b => b.classList.remove('active'));
-  document.getElementById('tab-btn-' + tab).classList.add('active');
-  const body = document.getElementById('robot-body');
-
-  if (tab === 'guia') {
-    body.innerHTML = `
-      <div class="robot-bubble">
-        <strong>Robot Guía del Reto 3 CRM</strong><br>
-        Explicación técnica del flujo del lead por la arquitectura de microservicios:
-      </div>
-
-      <div class="robot-step-card">
-        <div class="robot-step-title">1. Webhook API (Puerto 8080)</div>
-        Recibe el payload HTTP POST del lead y lo envía al exchange <code>leads.direct</code> en RabbitMQ.
-      </div>
-
-      <div class="robot-step-card">
-        <div class="robot-step-title">2. Agente Coordinador</div>
-        Lee de la cola central y orquesta el flujo secuencial hacia los agentes especializados manteniendo el contexto en Redis.
-      </div>
-
-      <div class="robot-step-card">
-        <div class="robot-step-title">3. Agente Análisis</div>
-        Clasifica el lead por facturación y sector para asignarle prioridad: <strong>Alta (High)</strong>, <strong>Media (Medium)</strong> o <strong>Baja (Low)</strong>.
-      </div>
-
-      <div class="robot-step-card">
-        <div class="robot-step-title">4. Agente Planificación</div>
-        Asigna el asesor comercial idóneo (Carlos Méndez, Sofía Castro, etc.) y programa las llamadas de seguimiento.
-      </div>
-
-      <div class="robot-step-card">
-        <div class="robot-step-title">5. Agente Ejecutor (SuiteCRM Puerto 8081)</div>
-        Consume la REST API v4.1 de SuiteCRM para crear el registro y vincular la actividad de seguimiento.
-      </div>
-
-      <div class="robot-step-card">
-        <div class="robot-step-title">6. Validador y Supervisor</div>
-        Valida que cumpla las reglas comerciales de negocio y monitorea SLAs de respuesta antes de cerrar el flujo.
-      </div>
-
-      <button class="btn-primary" style="width:100%;margin-top:10px" onclick="switchRobotTab('simular')">
-        Probar enviando un Lead ahora
-      </button>
-    `;
-  } else if (tab === 'simular') {
-    body.innerHTML = `
-      <div class="robot-bubble">
-        <strong>Simulador de Leads del Pipeline:</strong><br>
-        Envía un lead al Webhook y observa cómo se procesa en vivo por los agentes hasta aparecer en SuiteCRM.
-      </div>
-
-      <label style="font-size:0.72rem;font-weight:700;color:var(--text-muted)">EMPRESA:</label>
-      <input type="text" id="test-company" class="test-input" value="Banca Digital Colombia SAS">
-
-      <label style="font-size:0.72rem;font-weight:700;color:var(--text-muted)">SECTOR COMERCIAL:</label>
-      <select id="test-sector" class="test-input">
-        <option value="Fintech">Fintech (Prioridad Alta)</option>
-        <option value="Tecnologia">Tecnología (Prioridad Media)</option>
-        <option value="Retail">Retail (Prioridad Media)</option>
-        <option value="Salud">Salud (Prioridad Baja)</option>
-      </select>
-
-      <label style="font-size:0.72rem;font-weight:700;color:var(--text-muted)">PRESUPUESTO ANUAL ($ USD):</label>
-      <input type="number" id="test-revenue" class="test-input" value="850000">
-
-      <label style="font-size:0.72rem;font-weight:700;color:var(--text-muted)">CONTACTO:</label>
-      <input type="text" id="test-contact" class="test-input" value="contacto@bancadigital.co">
-
-      <button class="btn-primary" id="btn-submit-lead" style="width:100%;margin-top:6px" onclick="submitTestLead()">
-        Disparar Lead al Pipeline
-      </button>
-
-      <div id="sim-log" style="margin-top:14px;display:none"></div>
-    `;
-  } else if (tab === 'tests') {
-    loadTestResultsTab();
-  }
-}
-
-async function loadTestResultsTab() {
-  const body = document.getElementById('robot-body');
-  body.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-muted)">Cargando resultados...</div>';
-
-  try {
-    const res = await fetch('/api/test_results').then(r=>r.json());
-
-    if (res.status === 'SIN_DATOS' || res.total === 0) {
-      body.innerHTML = `
-        <div class="robot-bubble" style="background:#f8fafc;border-color:#e2e8f0;color:var(--text-body)">
-          <strong>Sin resultados aún</strong><br>
-          Ejecuta <code>python run_tests.py</code> para ver el reporte aquí.
-        </div>`;
-      ['nav-test-count','robot-test-count'].forEach(id => { const el=document.getElementById(id); if(el) el.textContent='0/0'; });
-      return;
-    }
-
-    const aprobado = res.status === 'APROBADO';
-    const bubbleStyle = aprobado
-      ? 'background:#ecfdf5;border-color:#a7f3d0;color:#065f46'
-      : 'background:#fef2f2;border-color:#fca5a5;color:#991b1b';
-    const label = `${res.passed}/${res.total}`;
-    ['nav-test-count','robot-test-count'].forEach(id => { const el=document.getElementById(id); if(el) el.textContent=label; });
-
-    const ts = res.timestamp ? ' · ' + res.timestamp.slice(0,19).replace('T',' ') : '';
-    body.innerHTML = `
-      <div class="robot-bubble" style="${bubbleStyle}">
-        <strong>Suite de Pruebas: ${res.score} ${aprobado ? 'APROBADO' : 'NO APROBADO'}</strong><br>
-        ${res.passed} de ${res.total} casos PASS · ${res.failed} FAIL${ts}
-      </div>
-      <div style="display:flex;flex-direction:column;gap:6px">
-        ${res.tests.map(t => {
-          const pass = t.status === 'PASS';
-          const badgeStyle = pass
-            ? 'background:#ecfdf5;color:#059669;border:1px solid #a7f3d0'
-            : 'background:#fef2f2;color:#dc2626;border:1px solid #fca5a5';
-          return `
-          <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:6px;padding:8px 10px;display:flex;align-items:center;justify-content:space-between">
-            <div>
-              <div style="font-weight:700;font-size:0.75rem">${t.id}</div>
-              <div style="font-size:0.7rem;color:var(--text-muted)">${t.name}${t.error ? ' — ' + t.error : ''}</div>
-            </div>
-            <span style="padding:2px 8px;border-radius:99px;font-size:0.7rem;font-weight:700;${badgeStyle}">${t.status}</span>
-          </div>`;
-        }).join('')}
-      </div>
-    `;
-  } catch(e) {
-    body.innerHTML = '<div style="color:var(--red);padding:20px">Error cargando reporte</div>';
-  }
-}
-
-async function submitTestLead() {
-  const btn = document.getElementById('btn-submit-lead');
-  btn.disabled = true;
-  btn.textContent = 'Enviando...';
-
-  const logBox = document.getElementById('sim-log');
-  logBox.style.display = 'block';
-  logBox.innerHTML = '<div style="color:var(--primary);font-weight:700;font-size:0.75rem">1. Contactando Webhook (Puerto 8080)...</div>';
-
-  const company = document.getElementById('test-company').value;
-  const sector  = document.getElementById('test-sector').value;
-  const rev     = document.getElementById('test-revenue').value;
-  const email   = document.getElementById('test-contact').value;
-
-  try {
-    const res = await fetch('/api/send_test_lead', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({
-        company: company,
-        sector: sector,
-        annual_revenue: rev,
-        email: email
-      })
-    }).then(r=>r.json());
-
-    if (res.status === 'ok') {
-      logBox.innerHTML += `<div style="color:var(--green);font-size:0.75rem;margin-top:4px">✓ Webhook aceptó el lead: <strong>${res.lead_id}</strong></div>`;
-      logBox.innerHTML += `<div style="color:var(--text-body);font-size:0.75rem;margin-top:4px">2. Coordinador procesando en RabbitMQ...</div>`;
-      
-      setTimeout(async () => {
-        logBox.innerHTML += `<div style="color:var(--green);font-size:0.75rem;margin-top:4px">✓ Análisis y Planificación completados</div>`;
-        logBox.innerHTML += `<div style="color:var(--primary);font-weight:700;font-size:0.75rem;margin-top:4px">3. Sincronizado en SuiteCRM (Puerto 8081)</div>`;
-        await refresh();
-        inspectLead(res.lead_id);
-        btn.disabled = false;
-        btn.textContent = '🚀 Disparar Otro Lead';
-      }, 2500);
-    } else {
-      logBox.innerHTML += `<div style="color:var(--red)">Error: ${res.message}</div>`;
-      btn.disabled = false;
-      btn.textContent = 'Reintentar';
-    }
-  } catch(e) {
-    logBox.innerHTML += `<div style="color:var(--red)">Error de conexión: ${e}</div>`;
-    btn.disabled = false;
-  }
-}
-
-function explainAgent(name) {
-  openRobot('guia');
-}
-
-function tellRobotAboutLead(d) {
-  // Cuando se inspecciona un lead, si el robot está abierto, dar un resumen
-  const win = document.getElementById('robot-window');
-  if (win.style.display === 'flex') {
-    const body = document.getElementById('robot-body');
-    const ctx = d.contexto || {};
-    const datos = ctx.datos_lead || {};
-    const resAnal = ctx.resultado_analysis || {};
-    const resPlan = ctx.resultado_planning || {};
-
-    body.innerHTML = `
-      <div class="robot-bubble">
-        🔍 <strong>Explicación del Lead Seleccionado:</strong><br>
-        Empresa: <strong>${datos.company || d.lead_id}</strong><br>
-        Estado actual: <strong>${ctx.estado || 'Procesado'}</strong>
-      </div>
-
-      <div class="robot-step-card">
-        <div class="robot-step-title">Análisis de Prioridad</div>
-        Clasificado como: <strong>${resAnal.prioridad || datos.rating || 'Medium'}</strong> en sector <em>${datos.industry || datos.sector || 'General'}</em>.
-      </div>
-
-      <div class="robot-step-card">
-        <div class="robot-step-title">Plan Comercial</div>
-        Asesor asignado: <strong>${resPlan.asignado_a || datos.assigned_user_name || 'Carlos Mendez'}</strong>.<br>
-        Acciones: <em>${(resPlan.acciones_sugeridas || []).join(', ') || 'Llamada de seguimiento inicial'}</em>.
-      </div>
-
-      <div class="robot-step-card">
-        <div class="robot-step-title">SuiteCRM (Puerto 8081)</div>
-        ${d.suitecrm_id ? '✓ Registro creado exitosamente con ID: <code>' + d.suitecrm_id + '</code>' : 'En proceso de sincronización o modo simulado.'}
-      </div>
-
-      <button class="btn-secondary" style="width:100%;margin-top:10px" onclick="switchRobotTab('guia')">
-        &larr; Volver a la Guía
-      </button>
-    `;
-  }
 }
 
 function refresh() {
@@ -1875,18 +1024,8 @@ function refresh() {
   loadHeartbeats();
 }
 
-async function loadTestResultsNav() {
-  try {
-    const res = await fetch('/api/test_results').then(r=>r.json());
-    const label = (!res || res.status === 'SIN_DATOS' || res.total === 0) ? '—' : `${res.passed}/${res.total}`;
-    ['nav-test-count','robot-test-count'].forEach(id => { const el=document.getElementById(id); if(el) el.textContent=label; });
-  } catch(e) {}
-}
-
 refresh();
-loadTestResultsNav();
 setInterval(refresh, 5000);
-setInterval(loadTestResultsNav, 15000);
 </script>
 </body>
 </html>"""
@@ -1895,5 +1034,5 @@ setInterval(loadTestResultsNav, 15000);
 @app.get("/", response_class=HTMLResponse)
 @app.get("/dashboard", response_class=HTMLResponse)
 def dashboard_ui():
-    html = _HTML.replace("__CRM_URL__", SUITECRM_EXTERNAL_URL).replace("__SPLASH_LOADER__", _SPLASH_HTML_RETO)
+    html = _HTML.replace("__CRM_URL__", SUITECRM_EXTERNAL_URL)
     return html

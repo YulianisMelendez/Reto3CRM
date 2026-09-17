@@ -18,7 +18,7 @@ import sys
 sys.path.insert(0, "/app/shared")
 from messaging import (
     get_rabbitmq_connection, declare_topology, build_message,
-    publish, log_message, get_redis, save_context
+    publish, log_message, get_redis, save_context, get_context
 )
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"),
@@ -156,12 +156,11 @@ async def receive_suitecrm_event(event: WebhookEvent, bg: BackgroundTasks):
 
     msg = build_message(lead_id, event.event_type, payload, origin="webhook")
 
-    try:
-        ch = get_channel()
-        publish(ch, "coordinator", msg)
-
-        # Inicializar contexto en Redis
-        r = get_redis()
+    # Inicializar contexto en Redis ANTES de publicar, y solo si el lead es
+    # nuevo: si ya existe, un reenvío/duplicado no debe pisar su estado —
+    # el Coordinador es quien decide si lo ignora o no.
+    r = get_redis()
+    if get_context(r, lead_id) is None:
         save_context(r, lead_id, {
             "lead_id":       lead_id,
             "estado":        "recibido",
@@ -170,13 +169,21 @@ async def receive_suitecrm_event(event: WebhookEvent, bg: BackgroundTasks):
             "timestamp_inicio": datetime.now(timezone.utc).isoformat(),
         })
 
-        # Registrar en PostgreSQL
-        log_message(lead_id, "webhook", "coordinador", event.event_type,
-                    payload, "published", message_id=msg["message_id"])
+    for attempt in range(2):
+        try:
+            ch = get_channel()
+            publish(ch, "coordinator", msg)
+            break
+        except Exception as e:
+            global rabbit_conn, rabbit_channel
+            rabbit_conn, rabbit_channel = None, None
+            if attempt == 1:
+                log.error(f"Error publicando a RabbitMQ tras reintento: {e}")
+                raise HTTPException(status_code=503, detail=f"Broker no disponible: {e}")
 
-    except Exception as e:
-        log.error(f"Error publicando a RabbitMQ: {e}")
-        raise HTTPException(status_code=503, detail=f"Broker no disponible: {e}")
+    # Registrar en PostgreSQL
+    log_message(lead_id, "webhook", "coordinador", event.event_type,
+                payload, "published", message_id=msg["message_id"])
 
     return {
         "accepted": True,
@@ -204,6 +211,19 @@ async def create_lead_direct(payload: DirectLeadPayload):
 
     msg = build_message(lead_id, "lead.created", event_payload, origin="webhook")
 
+    # Inicializar el contexto en Redis ANTES de publicar, y solo si el lead es
+    # nuevo: si ya existe (en curso o completado), un reenvío/duplicado no debe
+    # pisar su estado — el Coordinador es quien decide si lo ignora o no.
+    r = get_redis()
+    if get_context(r, lead_id) is None:
+        save_context(r, lead_id, {
+            "lead_id":       lead_id,
+            "estado":        "recibido",
+            "agente_actual": "coordinador",
+            "datos_lead":    lead_dict,
+            "timestamp_inicio": datetime.now(timezone.utc).isoformat(),
+        })
+
     for attempt in range(2):
         try:
             ch = get_channel()
@@ -215,15 +235,6 @@ async def create_lead_direct(payload: DirectLeadPayload):
             if attempt == 1:
                 log.error(f"Error tras reintento: {e}")
                 raise HTTPException(status_code=503, detail=str(e))
-
-    r = get_redis()
-    save_context(r, lead_id, {
-        "lead_id":       lead_id,
-        "estado":        "recibido",
-        "agente_actual": "coordinador",
-        "datos_lead":    lead_dict,
-        "timestamp_inicio": datetime.now(timezone.utc).isoformat(),
-    })
 
     log_message(lead_id, "webhook", "coordinador", "lead.created",
                 event_payload, "published", message_id=msg["message_id"])
